@@ -1,6 +1,7 @@
 import { ignoreFilesOrDirs } from '../../config/dict';
 import { formatToc } from '../markdown/md';
 import { FileTree } from './interface';
+import { stringify } from 'querystring';
 
 const walkSync = require('walk-sync');
 const readline = require('readline');
@@ -16,11 +17,14 @@ const debug = require('debug')('file');
  */
 export async function generateFileTree(parentDirectory: string) {
   const fileTree: FileTree = {
+    path: '',
     dirs: {},
     files: []
   };
 
-  const paths: string[] = walkSync(parentDirectory, { ignore: ['.git'] });
+  const paths: string[] = walkSync(parentDirectory, {
+    ignore: ['.git', '.github', '.meta']
+  });
 
   for (let path of paths) {
     let segments: string[] = path.split('/');
@@ -29,16 +33,14 @@ export async function generateFileTree(parentDirectory: string) {
 
     // 遍历每一段路径
     for (let segment of segments) {
-      if (segment.endsWith('.md')) {
-        // 这里的 segment 等价于文件名
-        let h1s: string[] = await readMarkdownHeadersFromFile(
-          parentDirectory + '/' + path
-        );
+      if (segment.endsWith('.xmind') || segment.endsWith('.pdf')) {
+        continue;
+      }
 
+      if (segment.endsWith('.md')) {
         obj.files.push({
           path,
           name: segment,
-          h1s,
           html_url: `./${path}`
         });
       } else {
@@ -55,6 +57,7 @@ export async function generateFileTree(parentDirectory: string) {
         // 判断是否存在目录结点
         if (!obj['dirs'][segment]) {
           obj['dirs'][segment] = {
+            path,
             dirs: {},
             files: []
           };
@@ -99,49 +102,12 @@ export function readMarkdownHeadersFromFile(path: string): Promise<string[]> {
 }
 
 /**
- * 生成二级列表形式目录，用于所有书籍系列
- * @param {FileTree} fileTree
- * @param dirAbsolutePathPrefix
- * @return {string}
- */
-export function generateTocFromFileTree(
-  fileTree: FileTree,
-  dirAbsolutePathPrefix = '.'
-): string {
-  let toc = '';
-
-  // 首先处理所有的文件
-  for (let file of fileTree.files) {
-    // 如果是需要忽略的文件，则直接跳过
-    if (ignoreFilesOrDirs.includes(file.name)) {
-      continue;
-    }
-
-    toc += `    ${formatToc(file)}`;
-  }
-
-  // 遍历当前目录下的所有文件夹
-  for (let dirName in fileTree.dirs) {
-    const dir = fileTree.dirs[dirName];
-
-    toc += `- [${dirName}](${dirAbsolutePathPrefix +
-      '/' +
-      dirName.replace(/' '/g, '%20') +
-      '/Index.md'}) \n`;
-
-    toc += generateTocFromFileTree(dir, dirAbsolutePathPrefix);
-  }
-
-  return toc;
-}
-
-/**
- * 功能：基于仓库内容，生成二级标题的目录，用于 Awesome Reference、Awesome CheatSheet 等系列
+ * 功能：基于仓库内容，生成二级标题的目录
  * @param {FileTree} fileTree
  * @param currentDepth
  * @return {string} 用于表示目录的字符串
  */
-export function generateTocFromFileTreeWithSubHeader(
+export function generateTocFromFileTree(
   fileTree: FileTree,
   currentDepth: number
 ): string {
@@ -154,29 +120,38 @@ export function generateTocFromFileTreeWithSubHeader(
       continue;
     }
 
-    toc += `${formatToc(file)}`;
+    toc += `${getBlankFromDepth(currentDepth - 1)}${formatToc(file)}`;
   }
 
   for (let dirName in fileTree.dirs) {
     const dir = fileTree.dirs[dirName];
 
     if (currentDepth == 0) {
-      toc += `# ${dirName} \n`;
-    } else if (currentDepth === 1) {
-      toc += `## ${dirName} \n`;
-    } else if (currentDepth === 2) {
-      toc += `### ${dirName} \n`;
+      toc += `\n## [${dirName}](../${dirName}/README.md) \n\n- [Introduction](../${dirName}/README.md) \n\n`;
     } else {
-      toc += `*** \n`;
+      toc += `${getBlankFromDepth(currentDepth - 1)}${formatToc({
+        name: dirName,
+        path: `${dir.path}README.md`
+      })}`;
     }
 
     // 进入下一级
     currentDepth += 1;
 
-    toc += generateTocFromFileTreeWithSubHeader(dir, currentDepth);
+    toc += generateTocFromFileTree(dir, currentDepth);
 
     currentDepth -= 1;
   }
 
   return toc;
+}
+
+export function getBlankFromDepth(depth: number) {
+  let str = '';
+
+  for (let i = 0; i < depth; i += 1) {
+    str += '  ';
+  }
+
+  return str;
 }
